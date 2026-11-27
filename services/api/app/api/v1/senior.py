@@ -10,7 +10,6 @@ from ...ai import assistant, tools
 from ...auth import require_role
 from ...db import get_db
 from ...models import (
-    Appointment,
     AuditEvent,
     Bill,
     DoseEvent,
@@ -20,7 +19,6 @@ from ...models import (
     User,
 )
 from ...schemas import (
-    AppointmentCreate,
     AssistantMessage,
     BillCreate,
     BillStatusUpdate,
@@ -121,42 +119,6 @@ def bill_status(
         return today.bill_dict(bill, scheduler.local_day(clock.now(), user.timezone))
 
     return idempotent(db, user, f"bill:{bill_id}", idempotency_key, action)
-
-
-@router.post("/appointments", status_code=201)
-def create_appointment(
-    body: AppointmentCreate,
-    user: User = Depends(senior_only),
-    db: Session = Depends(get_db),
-    idempotency_key: str | None = Header(default=None),
-):
-    """Manual appointment entry (blueprint 3C). The reminder engine picks it up."""
-    starts_at = scheduler.local_to_utc(body.starts_on, body.local_time, user.timezone)
-    if starts_at <= clock.now():
-        raise HTTPException(status_code=422, detail="That date and time have already passed.")
-
-    def action() -> dict:
-        appointment = Appointment(
-            owner_id=user.id,
-            title=body.title,
-            location=body.location,
-            starts_at=starts_at,
-            reminder_lead_minutes=body.reminder_lead_minutes,
-        )
-        db.add(appointment)
-        db.flush()
-        audit.record(
-            db,
-            actor_id=user.id,
-            subject_user_id=user.id,
-            action="appointment.create",
-            resource_type="appointment",
-            resource_id=appointment.id,
-        )
-        db.commit()
-        return today.appointment_dict(appointment, user.timezone)
-
-    return idempotent(db, user, "appointment:create", idempotency_key, action)
 
 
 @router.get("/notifications")

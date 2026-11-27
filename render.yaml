@@ -1,5 +1,8 @@
-# Render Blueprint: one web service (API + web app). The database is Supabase.
-# Deploy steps are in docs/hosting.md. Synthetic data only.
+# Render Blueprint: one free web service (API + built web app, from the Dockerfile).
+# In the Render dashboard: New -> Blueprint -> pick this repo, branch "main".
+# It asks for CARELENS_DEMO_PASSWORD; everything else is set here.
+# Free tier sleeps after 15 min idle (first open takes up to a minute).
+# Synthetic data only; the SQLite file is ephemeral and reseeds on every restart.
 services:
   - type: web
     name: carelens-demo
@@ -7,20 +10,16 @@ services:
     dockerfilePath: ./services/api/Dockerfile
     dockerContext: .
     plan: free
+    branch: main
     healthCheckPath: /health
     autoDeploy: true
     envVars:
       - key: CARELENS_ENV
         value: demo
-      # Every tester gets a private copy behind the access code.
-      - key: CARELENS_SANDBOXES
-        value: "1"
-      # You choose this in the Render dashboard when the Blueprint is created.
-      - key: CARELENS_ACCESS_CODE
-        sync: false
       - key: CARELENS_SECRET_KEY
         generateValue: true
-      # Your Supabase "Session pooler" connection string (see docs/hosting.md).
-      # Entered in the Render dashboard; never commit it.
-      - key: CARELENS_DATABASE_URL
+      # The one password everyone with the link types (any user name).
+      - key: CARELENS_DEMO_PASSWORD
         sync: false
+      # Optional, add later in the Environment tab to turn Claude on:
+      # ANTHROPIC_API_KEY=sk-ant-...   (and CARELENS_INTENT_MODEL=claude-haiku-5-5 to keep it cheap)

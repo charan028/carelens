@@ -1,9 +1,8 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import {
   api,
   ApiError,
   OfflineError,
-  type Appointment,
   type AssistantReply,
   type Bill,
   type Consents,
@@ -12,24 +11,8 @@ import {
   type Today,
 } from "../api/client";
 import { applyQueue, dueLocalReminders, flushQueue, OfflineStore } from "../api/offline";
-import {
-  AWAITING,
-  clockTime,
-  DayStrip,
-  doseTone,
-  GlassesPanel,
-  periodOfHour,
-  SourceList,
-  StatusChip,
-} from "../components/parts";
-import {
-  stopSpeaking,
-  voiceInputAvailable,
-  type OutputRouter,
-  type PhoneAdapter,
-  type SimulatedGlassesAdapter,
-  type WearableEvent,
-} from "../wearables/WearableAdapter";
+import { AWAITING, clockTime, DayStrip, doseTone, periodOfHour, SourceList, StatusChip } from "../components/parts";
+import { stopListening, stopSpeaking, voiceInputAvailable, type PhoneAdapter } from "../wearables/WearableAdapter";
 
 const SUGGESTIONS = [
   "What should I do this morning?",
@@ -45,22 +28,20 @@ const OFFLINE_REPLY =
 
 interface Props {
   token: string;
-  devices: { router: OutputRouter; phone: PhoneAdapter; glasses: SimulatedGlassesAdapter };
-  events: WearableEvent[];
+  phone: PhoneAdapter;
   offline: boolean;
   nowMs: () => number;
   refreshKey: number;
   onServerTime: (nowIso: string, simulated: boolean) => void;
-  speech: { enabled: boolean; quiet: boolean; setEnabled: (v: boolean) => void; setQuiet: (v: boolean) => void };
-  side: ReactNode;
+  speech: { enabled: boolean; setEnabled: (v: boolean) => void };
 }
 
 type Tab = "today" | "bills" | "sharing";
-type Exchange = { question: string; reply: AssistantReply; via: "phone" | "glasses-sim" };
+type Exchange = { question: string; reply: AssistantReply };
 
 const store = new OfflineStore(window.localStorage);
 
-export function SeniorApp({ token, devices, events, offline, nowMs, refreshKey, onServerTime, speech, side }: Props) {
+export function SeniorApp({ token, phone, offline, nowMs, refreshKey, onServerTime, speech }: Props) {
   const [today, setToday] = useState<Today | null>(null);
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("today");
@@ -68,7 +49,7 @@ export function SeniorApp({ token, devices, events, offline, nowMs, refreshKey, 
   const [banner, setBanner] = useState<{ title: string; body: string; local: boolean } | null>(null);
   const [typed, setTyped] = useState("");
   const [busy, setBusy] = useState(false);
-  const [listening, setListening] = useState<"" | "phone" | "glasses-sim">("");
+  const [listening, setListening] = useState(false);
   const [problem, setProblem] = useState("");
   const [queued, setQueued] = useState(store.queue().length);
 
@@ -83,12 +64,9 @@ export function SeniorApp({ token, devices, events, offline, nowMs, refreshKey, 
   const announce = useCallback(
     (title: string, body: string, local: boolean) => {
       setBanner({ title, body, local });
-      devices.router.present(
-        { speech: speech.quiet ? "You have a reminder. Please look at your phone." : body, display: title },
-        true,
-      );
+      phone.present({ speech: body, display: title });
     },
-    [devices.router, speech.quiet],
+    [phone],
   );
 
   const load = useCallback(async () => {
@@ -158,7 +136,7 @@ export function SeniorApp({ token, devices, events, offline, nowMs, refreshKey, 
     return () => window.clearInterval(timer);
   }, [offline, nowMs, announce]);
 
-  const ask = async (question: string, via: "phone" | "glasses-sim") => {
+  const ask = async (question: string) => {
     const text = question.trim();
     if (!text || busy) return;
     setBusy(true);
@@ -168,7 +146,7 @@ export function SeniorApp({ token, devices, events, offline, nowMs, refreshKey, 
       try {
         reply = await api<AssistantReply>("/v1/assistant/message", {
           token,
-          body: { text, channel: via === "phone" ? "phone" : "glasses", context: context.current },
+          body: { text, channel: "phone", context: context.current },
         });
       } catch (error) {
         if (!(error instanceof OfflineError)) throw error;
@@ -180,15 +158,10 @@ export function SeniorApp({ token, devices, events, offline, nowMs, refreshKey, 
       }
       if (reply.focus) context.current.focus_dose_event_id = reply.focus.dose_event_id;
       context.current.last_reply = reply.text;
-      setExchange({ question: text, reply, via });
+      setExchange({ question: text, reply });
       setTab("today");
       bodyRef.current?.scrollTo({ top: 0 });
-      const refusal = reply.intent === "safety_refusal";
-      devices.router.present(
-        // Safety messages are always spoken in full, even in quiet mode.
-        { speech: speech.quiet && !refusal ? `${reply.display}. Details are on your phone.` : reply.text, display: reply.display },
-        via === "glasses-sim",
-      );
+      phone.present({ speech: reply.text, display: reply.display });
       if (reply.changed) {
         setBanner(null);
         await load();
@@ -200,15 +173,23 @@ export function SeniorApp({ token, devices, events, offline, nowMs, refreshKey, 
     }
   };
 
-  const listen = async (via: "phone" | "glasses-sim") => {
+  const listen = async () => {
+    if (listening) {
+      stopListening(); // second tap: "I'm done talking"
+      return;
+    }
     setProblem("");
-    setListening(via);
+    setListening(true);
+    setTyped("");
     try {
-      const heard = await (via === "phone" ? devices.phone : devices.glasses).listen();
-      setListening("");
-      await ask(heard, via);
+      // Words appear in the box as they are heard, so the person can see it is working.
+      const heard = await phone.listen((text) => setTyped(text));
+      setListening(false);
+      setTyped("");
+      await ask(heard);
     } catch (error) {
-      setListening("");
+      // Whatever was heard stays in the box, so it can be fixed and sent by hand.
+      setListening(false);
       setProblem((error as Error).message);
     }
   };
@@ -237,7 +218,7 @@ export function SeniorApp({ token, devices, events, offline, nowMs, refreshKey, 
     event.preventDefault();
     const text = typed;
     setTyped("");
-    void ask(text, "phone");
+    void ask(text);
   };
 
   const hour = Number(
@@ -282,12 +263,12 @@ export function SeniorApp({ token, devices, events, offline, nowMs, refreshKey, 
         <div className="phone-body" ref={bodyRef}>
           {exchange && tab === "today" && (
             <section className={`answer ${exchange.reply.intent === "safety_refusal" ? "answer-refusal" : ""}`} aria-live="polite">
-              <p className="answer-question">You asked{exchange.via === "glasses-sim" ? " through the glasses" : ""}: “{exchange.question}”</p>
+              <p className="answer-question">You asked: “{exchange.question}”</p>
               <p className="answer-text">{exchange.reply.text}</p>
               {exchange.reply.options.length > 0 && (
                 <div className="row">
                   {exchange.reply.options.map((option) => (
-                    <button key={option} className="button" onClick={() => void ask(`${exchange.question} ${option}`, "phone")}>
+                    <button key={option} className="button" onClick={() => void ask(`${exchange.question} ${option}`)}>
                       {option}
                     </button>
                   ))}
@@ -297,18 +278,17 @@ export function SeniorApp({ token, devices, events, offline, nowMs, refreshKey, 
             </section>
           )}
           {today && tab === "today" && (
-            <TodayScreen today={today} hour={hour} timeZone={timeZone} token={token} onReport={report} onBills={() => setTab("bills")} onChanged={load} />
+            <TodayScreen today={today} hour={hour} timeZone={timeZone} onReport={report} onBills={() => setTab("bills")} />
           )}
           {today && tab === "bills" && <BillsScreen token={token} offline={offline} onChanged={load} refreshKey={refreshKey} />}
-          {tab === "sharing" && <SharingScreen token={token} offline={offline} speech={speech} />}
-
+          {tab === "sharing" && <SharingScreen token={token} offline={offline} />}
         </div>
 
         <footer className="talk">
           {tab === "today" && (
             <div className="suggestions">
               {SUGGESTIONS.map((suggestion) => (
-                <button key={suggestion} className="suggestion" disabled={busy} onClick={() => void ask(suggestion, "phone")}>
+                <button key={suggestion} className="suggestion" disabled={busy} onClick={() => void ask(suggestion)}>
                   {suggestion}
                 </button>
               ))}
@@ -317,11 +297,11 @@ export function SeniorApp({ token, devices, events, offline, nowMs, refreshKey, 
           <form className="talk-row" onSubmit={onSubmit}>
             <button
               type="button"
-              className={`mic ${listening === "phone" ? "is-listening" : ""}`}
-              onClick={() => void listen("phone")}
+              className={`mic ${listening ? "is-listening" : ""}`}
+              onClick={() => void listen()}
               // Stays tappable without voice support: the tap explains why, which a tooltip can't on a phone.
-              disabled={busy || listening !== ""}
-              aria-label={voiceInputAvailable() ? "Talk to CareLens" : "Voice input isn't available in this browser"}
+              disabled={busy}
+              aria-label={listening ? "Done talking" : voiceInputAvailable() ? "Talk to CareLens" : "Voice input isn't available in this browser"}
             >
               <svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true">
                 <rect x="9" y="3" width="6" height="11" rx="3" fill="currentColor" />
@@ -329,7 +309,7 @@ export function SeniorApp({ token, devices, events, offline, nowMs, refreshKey, 
               </svg>
             </button>
             <label className="visually-hidden" htmlFor="ask">Type a question</label>
-            <input id="ask" value={typed} onChange={(event) => setTyped(event.target.value)} placeholder={listening === "phone" ? "Listening…" : "Or type here"} maxLength={400} />
+            <input id="ask" value={typed} onChange={(event) => setTyped(event.target.value)} placeholder={listening ? "Listening… tap the microphone when you're done" : "Or type here"} maxLength={400} />
             <button className="button button-primary" disabled={busy || !typed.trim()}>Ask</button>
           </form>
           <nav className="tabs" aria-label="Screens">
@@ -341,17 +321,6 @@ export function SeniorApp({ token, devices, events, offline, nowMs, refreshKey, 
           </nav>
         </footer>
       </div>
-
-      <aside className="side">
-        <GlassesPanel
-          glasses={devices.glasses}
-          events={events}
-          listening={listening === "glasses-sim"}
-          onListen={() => void listen("glasses-sim")}
-          onSay={(text) => void ask(text, "glasses-sim")}
-        />
-        {side}
-      </aside>
     </div>
   );
 }
@@ -362,27 +331,25 @@ interface TodayProps {
   today: Today;
   hour: number;
   timeZone: string;
-  token: string;
   onReport: (dose: Dose, status: "taken" | "skipped" | "unsure") => void;
   onBills: () => void;
-  onChanged: () => void;
 }
 
-function TodayScreen({ today, hour, timeZone, token, onReport, onBills, onChanged }: TodayProps) {
-  const [changing, setChanging] = useState<string | null>(null);
+function TodayScreen({ today, hour, timeZone, onReport, onBills }: TodayProps) {
   const openBills = today.bills.filter((bill) => ["upcoming", "due", "overdue"].includes(bill.status));
+  const jump = (period: Dose["period"]) =>
+    document.querySelector(`[data-period="${period}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" });
   return (
     <>
-      <DayStrip doses={today.medications} current={periodOfHour(hour)} />
+      <DayStrip doses={today.medications} current={periodOfHour(hour)} onJump={jump} />
 
       <section aria-labelledby="meds-title">
         <h2 id="meds-title">Medicines</h2>
         {today.medications.length === 0 && <p className="empty">No verified medicines are scheduled today.</p>}
         {today.medications.map((dose) => {
           const awaiting = AWAITING.includes(dose.status) || dose.status === "unknown";
-          const showButtons = awaiting || changing === dose.dose_event_id;
           return (
-            <article key={dose.dose_event_id} className={`task task-${doseTone(dose)}`}>
+            <article key={dose.dose_event_id} className={`task task-${doseTone(dose)}`} data-period={dose.period}>
               <p className="task-time">{dose.local_time}</p>
               <div className="task-main">
                 <h3>
@@ -398,14 +365,12 @@ function TodayScreen({ today, hour, timeZone, token, onReport, onBills, onChange
                       : dose.status_label}
                 </StatusChip>
                 {dose.pending_sync && <p className="task-meta">Saved on this phone. It will sync when you&rsquo;re back online.</p>}
-                {showButtons ? (
+                {awaiting && (
                   <div className="row">
-                    <button className="button button-primary" onClick={() => { setChanging(null); onReport(dose, "taken"); }}>I took it</button>
-                    <button className="button" onClick={() => { setChanging(null); onReport(dose, "skipped"); }}>I skipped it</button>
-                    <button className="button" onClick={() => { setChanging(null); onReport(dose, "unsure"); }}>Not sure</button>
+                    <button className="button button-primary" onClick={() => onReport(dose, "taken")}>I took it</button>
+                    <button className="button" onClick={() => onReport(dose, "skipped")}>I skipped it</button>
+                    <button className="button" onClick={() => onReport(dose, "unsure")}>Not sure</button>
                   </div>
-                ) : (
-                  <button className="button button-quiet" onClick={() => setChanging(dose.dose_event_id)}>Change my answer</button>
                 )}
               </div>
             </article>
@@ -431,65 +396,7 @@ function TodayScreen({ today, hour, timeZone, token, onReport, onBills, onChange
           </article>
         ))}
       </section>
-
-      <AppointmentsSection appointments={today.appointments} token={token} onChanged={onChanged} />
     </>
-  );
-}
-
-function AppointmentsSection({ appointments, token, onChanged }: { appointments: Appointment[]; token: string; onChanged: () => void }) {
-  const [adding, setAdding] = useState(false);
-  const [form, setForm] = useState({ title: "", date: "", time: "", location: "" });
-  const [note, setNote] = useState("");
-  const [error, setError] = useState("");
-
-  const add = async (event: FormEvent) => {
-    event.preventDefault();
-    setError("");
-    try {
-      const saved = await api<Appointment>("/v1/appointments", {
-        token,
-        body: { title: form.title, starts_on: form.date, local_time: form.time, location: form.location },
-        idempotencyKey: `appt-${Date.now().toString(36)}`,
-      });
-      setNote(`Added: ${saved.title}, ${saved.date_label} at ${saved.local_time}. You'll get a reminder two hours before.`);
-      setForm({ title: "", date: "", time: "", location: "" });
-      setAdding(false);
-      onChanged();
-    } catch (problem) {
-      setError(problem instanceof OfflineError ? "Appointments can't be added while you're offline." : (problem as Error).message);
-    }
-  };
-
-  return (
-    <section aria-labelledby="appt-title">
-      <h2 id="appt-title">Appointments this week</h2>
-      {appointments.length === 0 && <p className="empty">No appointments in the next seven days.</p>}
-      {appointments.map((appointment) => (
-        <article key={appointment.id} className="line">
-          <div>
-            <h3>{appointment.title}</h3>
-            <p className="task-meta">{appointment.date_label} at {appointment.local_time}{appointment.location ? `, ${appointment.location}` : ""}</p>
-          </div>
-        </article>
-      ))}
-      {note && <p className="notice notice-reminder" role="status">{note}</p>}
-      {error && <p className="notice notice-problem" role="alert">{error}</p>}
-      {adding ? (
-        <form className="form" onSubmit={add}>
-          <label>What is it?<input required maxLength={160} value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} /></label>
-          <label>Date<input required type="date" value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} /></label>
-          <label>Time<input required type="time" value={form.time} onChange={(event) => setForm({ ...form, time: event.target.value })} /></label>
-          <label>Where (optional)<input maxLength={160} value={form.location} onChange={(event) => setForm({ ...form, location: event.target.value })} /></label>
-          <div className="row">
-            <button className="button button-primary">Save appointment</button>
-            <button type="button" className="button button-quiet" onClick={() => setAdding(false)}>Cancel</button>
-          </div>
-        </form>
-      ) : (
-        <button className="button" onClick={() => { setNote(""); setAdding(true); }}>Add an appointment</button>
-      )}
-    </section>
   );
 }
 
@@ -517,9 +424,9 @@ function BillsScreen({ token, offline, onChanged, refreshKey }: { token: string;
 
   useEffect(() => void load(), [load, offline, refreshKey]);
 
-  const setStatus = async (bill: Bill, status: string, source = "self_report") => {
+  const paid = async (bill: Bill) => {
     try {
-      await api(`/v1/bills/${bill.id}/status`, { token, body: { status, source } });
+      await api(`/v1/bills/${bill.id}/status`, { token, body: { status: "self_reported_paid", source: "self_report" } });
       await load();
       onChanged();
     } catch (problem) {
@@ -553,23 +460,20 @@ function BillsScreen({ token, offline, onChanged, refreshKey }: { token: string;
         {bills?.length === 0 && <p className="empty">No bills yet. Add one below to get a reminder before it&rsquo;s due.</p>}
         {bills?.map((bill) => {
           const open = ["upcoming", "due", "overdue"].includes(bill.status);
+          const tone = open ? (bill.status === "upcoming" ? "later" : "due") : "done";
           return (
-            <article key={bill.id} className={`task task-${open ? (bill.status === "upcoming" ? "later" : "due") : "done"}`}>
+            <article key={bill.id} className={`task task-${tone}`}>
               <div className="task-main">
                 <h3>{bill.payee_label}</h3>
                 <p className="task-meta">{bill.amount ? `${bill.amount}, ` : "Amount not entered, "}{dueText(bill)}{bill.recurrence !== "none" ? `, repeats ${bill.recurrence}` : ""}</p>
-                <StatusChip tone={open ? (bill.status === "upcoming" ? "later" : "due") : "done"}>
+                <StatusChip tone={tone}>
                   {bill.status === "self_reported_paid" ? "You said you paid. Not confirmed by the company." : bill.status_label}
                 </StatusChip>
-                <div className="row">
-                  {open && <button className="button button-primary" onClick={() => void setStatus(bill, "self_reported_paid")}>I paid this</button>}
-                  {bill.status === "self_reported_paid" && (
-                    <>
-                      <button className="button" onClick={() => void setStatus(bill, "verified_paid", "biller_confirmation")}>I have the company&rsquo;s confirmation</button>
-                      <button className="button button-quiet" onClick={() => void setStatus(bill, "upcoming")}>Undo</button>
-                    </>
-                  )}
-                </div>
+                {open && (
+                  <div className="row">
+                    <button className="button button-primary" onClick={() => void paid(bill)}>I paid this</button>
+                  </div>
+                )}
               </div>
             </article>
           );
@@ -598,17 +502,15 @@ function BillsScreen({ token, offline, onChanged, refreshKey }: { token: string;
 
 // --- Sharing -----------------------------------------------------------------
 
-const SCOPE_LABELS: Record<string, string> = { medications: "Medicines", bills: "Bills", appointments: "Appointments" };
+const SCOPE_LABELS: Record<string, string> = { medications: "Medicines", bills: "Bills" };
 
-function SharingScreen({ token, offline, speech }: { token: string; offline: boolean; speech: Props["speech"] }) {
+function SharingScreen({ token, offline }: { token: string; offline: boolean }) {
   const [consents, setConsents] = useState<Consents | null>(null);
-  const [activity, setActivity] = useState<{ at: string; actor: string; action: string }[]>([]);
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
     try {
       setConsents(await api<Consents>("/v1/consents", { token }));
-      setActivity((await api<{ events: { at: string; actor: string; action: string }[] }>("/v1/audit", { token })).events);
       setError("");
     } catch (problem) {
       setError(problem instanceof OfflineError ? "Sharing can't be changed while you're offline." : (problem as Error).message);
@@ -617,110 +519,44 @@ function SharingScreen({ token, offline, speech }: { token: string; offline: boo
 
   useEffect(() => void load(), [load, offline]);
 
-  const change = async (path: string, body: object) => {
+  const change = async (body: object) => {
     try {
-      setConsents(await api<Consents>(path, { token, body }));
-      await load();
+      setConsents(await api<Consents>("/v1/consents", { token, body }));
     } catch (problem) {
       setError(problem instanceof OfflineError ? "Sharing can't be changed while you're offline." : (problem as Error).message);
     }
   };
 
   return (
-    <>
-      <section aria-labelledby="share-title">
-        <h2 id="share-title">Who can see your list</h2>
-        <p className="task-meta">You decide. Nothing is shared unless you turn it on here, and you can stop at any time.</p>
-        {error && <p className="notice notice-problem">{error}</p>}
-        {consents?.caregivers.map((person) => {
-          const toggle = (scope: string) => {
-            const scopes = person.scopes.includes(scope) ? person.scopes.filter((s) => s !== scope) : [...person.scopes, scope];
-            void change("/v1/consents", { action: scopes.length ? "grant" : "revoke", caregiver_id: person.caregiver_id, scopes, alerts_enabled: person.alerts_enabled && scopes.length > 0 });
-          };
-          return (
-            <article key={person.caregiver_id} className="task task-later">
-              <div className="task-main">
-                <h3>{person.display_name}</h3>
-                <p className="task-meta">{person.scopes.length ? "Can see what you tick below" : "Sees nothing"}</p>
-                {Object.entries(SCOPE_LABELS).map(([scope, label]) => (
-                  <label key={scope} className="switch">
-                    <input type="checkbox" checked={person.scopes.includes(scope)} onChange={() => toggle(scope)} />
-                    <span>{label}</span>
-                  </label>
-                ))}
-                <label className="switch">
-                  <input
-                    type="checkbox"
-                    disabled={person.scopes.length === 0}
-                    checked={person.alerts_enabled}
-                    onChange={(event) => void change("/v1/consents", { action: "grant", caregiver_id: person.caregiver_id, scopes: person.scopes, alerts_enabled: event.target.checked })}
-                  />
-                  <span>May get a note if I don&rsquo;t answer reminders</span>
+    <section aria-labelledby="share-title">
+      <h2 id="share-title">Who can see your list</h2>
+      <p className="task-meta">You decide. Nothing is shared unless you turn it on here, and you can stop at any time.</p>
+      {error && <p className="notice notice-problem">{error}</p>}
+      {consents?.caregivers.map((person) => {
+        const toggle = (scope: string) => {
+          const scopes = person.scopes.includes(scope) ? person.scopes.filter((s) => s !== scope) : [...person.scopes, scope];
+          void change({ action: scopes.length ? "grant" : "revoke", caregiver_id: person.caregiver_id, scopes, alerts_enabled: person.alerts_enabled && scopes.length > 0 });
+        };
+        return (
+          <article key={person.caregiver_id} className="task task-later">
+            <div className="task-main">
+              <h3>{person.display_name}</h3>
+              <p className="task-meta">{person.scopes.length ? "Can see what you tick below" : "Sees nothing"}</p>
+              {Object.entries(SCOPE_LABELS).map(([scope, label]) => (
+                <label key={scope} className="switch">
+                  <input type="checkbox" checked={person.scopes.includes(scope)} onChange={() => toggle(scope)} />
+                  <span>{label}</span>
                 </label>
-                {person.scopes.length > 0 && (
-                  <button className="button button-quiet" onClick={() => void change("/v1/consents", { action: "revoke", caregiver_id: person.caregiver_id, scopes: [] })}>
-                    Stop sharing with {person.display_name.split(" ")[0]}
-                  </button>
-                )}
-              </div>
-            </article>
-          );
-        })}
-      </section>
-
-      {consents && (
-        <section aria-labelledby="escalation-title">
-          <h2 id="escalation-title">Unanswered reminders</h2>
-          <label className="switch">
-            <input type="checkbox" checked={consents.escalation_enabled} onChange={(event) => void change("/v1/me/escalation", { escalation_enabled: event.target.checked, escalation_after_reminders: consents.escalation_after_reminders })} />
-            <span>Send a note to people I&rsquo;ve allowed</span>
-          </label>
-          <label className="form-inline">After
-            <select value={consents.escalation_after_reminders} disabled={!consents.escalation_enabled} onChange={(event) => void change("/v1/me/escalation", { escalation_enabled: true, escalation_after_reminders: Number(event.target.value) })}>
-              {[1, 2, 3].map((count) => <option key={count} value={count}>{count}</option>)}
-            </select>
-            unanswered reminder{consents.escalation_after_reminders === 1 ? "" : "s"}
-          </label>
-          <p className="task-meta">The note says you haven&rsquo;t answered. It doesn&rsquo;t name the medicine, and it isn&rsquo;t an emergency alarm.</p>
-        </section>
-      )}
-
-      <section aria-labelledby="privacy-title">
-        <h2 id="privacy-title">When others are nearby</h2>
-        <label className="switch">
-          <input type="checkbox" checked={speech.quiet} onChange={(event) => speech.setQuiet(event.target.checked)} />
-          <span>Don&rsquo;t say medicine or bill details aloud</span>
-        </label>
-      </section>
-
-      <section aria-labelledby="activity-title">
-        <h2 id="activity-title">Activity on your records</h2>
-        <ol className="activity">
-          {activity.slice(0, 12).map((item, index) => (
-            <li key={`${item.at}-${index}`}>
-              <span>{new Date(item.at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/Chicago" })}</span> {item.actor.replace(" (synthetic)", "")}: {ACTIONS[item.action] ?? item.action}
-            </li>
-          ))}
-        </ol>
-      </section>
-    </>
+              ))}
+              {person.scopes.length > 0 && (
+                <button className="button button-quiet" onClick={() => void change({ action: "revoke", caregiver_id: person.caregiver_id, scopes: [] })}>
+                  Stop sharing with {person.display_name.split(" ")[0]}
+                </button>
+              )}
+            </div>
+          </article>
+        );
+      })}
+    </section>
   );
 }
-
-const ACTIONS: Record<string, string> = {
-  "caregiver.view": "looked at what you share",
-  "consent.grant": "sharing turned on or changed",
-  "consent.revoke": "sharing stopped",
-  "assistant.message": "asked CareLens something",
-  "dose.self_report.taken": "said a medicine was taken",
-  "dose.self_report.skipped": "said a medicine was skipped",
-  "dose.self_report.unsure": "wasn't sure about a medicine",
-  "bill.create": "added a bill",
-  "appointment.create": "added an appointment",
-  "bill.reminder.create": "asked for a bill reminder",
-  "bill.status.self_reported_paid": "said a bill was paid",
-  "bill.status.verified_paid": "confirmed a bill payment from a record",
-  "prescription.verify": "verified a prescription record",
-  "escalation.update": "changed unanswered-reminder notes",
-  "caregiver.alert.request": "asked a caregiver to check in",
-};

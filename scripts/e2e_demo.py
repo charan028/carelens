@@ -14,6 +14,7 @@ with sync_playwright() as p:
     pg.on("console", lambda m: errs.append(m.text) if m.type=="error" else None)
     pg.on("pageerror", lambda e: errs.append(str(e)))
     pg.goto(BASE); pg.wait_for_selector(".phone-date")
+    pg.click(".demobar-summary")  # open the demo drawer (people + clock)
     pg.click("text=Restart the day at 7:55 AM"); pg.wait_for_selector(".daystrip"); pg.wait_for_timeout(800)
     pg.click("text=+10 min"); pg.wait_for_selector(".notice-reminder", timeout=10000)
     pg.screenshot(path=f"{OUT}/1-reminder.png")
@@ -22,10 +23,6 @@ with sync_playwright() as p:
         print(q, "->", pg.inner_text(".answer-text")[:110])
     pg.locator(".phone-body").evaluate("e => e.scrollTop = 0"); pg.screenshot(path=f"{OUT}/2-after-story.png")
     pg.locator(".phone-body").evaluate("e => e.scrollTop = e.scrollHeight"); pg.screenshot(path=f"{OUT}/3-answer.png")
-    # glasses
-    pg.click("text=Connect glasses"); pg.fill("#glasses-say","what bills do I have"); pg.click("text=Say it"); pg.wait_for_timeout(900)
-    print("lens:", pg.inner_text(".lens"))
-    pg.click("text=Disconnect glasses")
     # refusal
     pg.fill("#ask","Can I take two today?"); pg.click("button:has-text('Ask')"); pg.wait_for_selector(".answer-refusal"); print("refusal:", pg.inner_text(".answer-text")[:80])
     pg.screenshot(path=f"{OUT}/4-refusal.png")
@@ -36,7 +33,6 @@ with sync_playwright() as p:
     pg.locator(".phone-body").evaluate("e => e.scrollTop = 0")
     pg.locator("article:has-text('metformin') >> text=I took it").click(); pg.wait_for_selector("text=Saved on this phone")
     pg.screenshot(path=f"{OUT}/5-offline.png")
-    print("events:", pg.inner_text(".eventlog").replace("\n"," | ")[:300])
     pg.uncheck("text=Cut the phone’s network"); pg.wait_for_timeout(5000)
     print("offline banner gone:", pg.locator(".notice-offline").count()==0, "| pending sync left:", pg.locator("text=Saved on this phone").count())
     # bills + sharing

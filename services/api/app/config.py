@@ -42,34 +42,20 @@ class Settings:
     run_engine_loop: bool = _flag("CARELENS_RUN_ENGINE", True)
     engine_interval_s: float = float(os.environ.get("CARELENS_ENGINE_INTERVAL", "15"))
     assistant_rate_limit_per_min: int = int(os.environ.get("CARELENS_RATE_LIMIT", "60"))
+    # Intent classification: Claude when credentials exist, else the rules.
+    # Either way the model only picks an intent name; replies stay templated.
+    intent_llm: bool = _flag("CARELENS_INTENT_LLM", bool(os.environ.get("ANTHROPIC_API_KEY")))
+    intent_model: str = os.environ.get("CARELENS_INTENT_MODEL", "claude-opus-5-5")
+    # One shared password in front of a public demo link (HTTP Basic). Empty = open.
+    demo_password: str = os.environ.get("CARELENS_DEMO_PASSWORD", "")
     web_dist: Path = Path(
         os.environ.get("CARELENS_WEB_DIST", str(REPO_ROOT / "apps" / "web" / "dist"))
     )
     synthetic_dir: Path = REPO_ROOT / "data" / "synthetic"
 
-    # --- hosted demo -------------------------------------------------------
-    # With sandboxes on, every tester gets a private copy of the synthetic
-    # records and their own simulated clock. Required for any public URL.
-    sandboxes: bool = _flag("CARELENS_SANDBOXES", False)
-    access_code: str = os.environ.get("CARELENS_ACCESS_CODE", "")
-    sandbox_max: int = int(os.environ.get("CARELENS_SANDBOX_MAX", "200"))
-    sandbox_idle_days: int = int(os.environ.get("CARELENS_SANDBOX_IDLE_DAYS", "7"))
-    sandbox_dir: Path = Path(os.environ.get("CARELENS_SANDBOX_DIR", str(REPO_ROOT / ".sandboxes")))
-
     @property
     def is_demo(self) -> bool:
         return self.env in {"demo", "test"}
-
-    def hosted_problems(self) -> list[str]:
-        """Reasons this configuration must not be exposed on a public URL."""
-        if not self.sandboxes:
-            return []
-        problems = []
-        if self.secret_key == DEMO_SECRET or len(self.secret_key) < 24:
-            problems.append("CARELENS_SECRET_KEY must be a private random value of 24+ characters")
-        if len(self.access_code) < 6:
-            problems.append("CARELENS_ACCESS_CODE must be set (6+ characters)")
-        return problems
 
 
 settings = Settings()

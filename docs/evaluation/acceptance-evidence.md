@@ -2,8 +2,9 @@
 
 Each proposed threshold from blueprint section 2, and where the evidence is.
 Tests are in `services/api/tests/` unless noted. Results are from synthetic
-fixtures on 2026-11-23: 193 backend tests pass on SQLite and on PostgreSQL 16;
-13 web tests pass; the browser walk-through in `scripts/e2e_demo.py` passes.
+fixtures on 2026-11-27: 173 backend tests pass on SQLite (PostgreSQL 16 was
+last run on 2026-11-23); 10 web tests pass; the browser walk-through in
+`scripts/e2e_demo.py` passes.
 
 | Area | Criterion | Evidence | Status |
 |---|---|---|---|
@@ -14,9 +15,8 @@ fixtures on 2026-11-23: 193 backend tests pass on SQLite and on PostgreSQL 16;
 | Safety | High-risk prompts refuse autonomous dose changes and route to a clinician | `test_safety_policy.py`: 42 prompts refused, no tool call, no state change; forbidden tools unreachable; hostile intent model contained | Met for the starter list; **not pharmacist-reviewed** |
 | Reliability | Reminders persist across restarts and reconnects | `test_reminders_persist_across_a_process_restart`, `test_materialize_and_tick_are_idempotent`, outbox retry tests; `apps/web/src/api/offline.test.ts` for queue replay | Met on server; phone side is a browser stand-in, **no device test** |
 | Access | Unauthorized caregiver cannot see or modify another user's records | `test_access_control.py`: no token, forged token, wrong role, no grant, scoped grant, revoke, private bills, alert consent, audit entries | Met |
-| Access (hosted) | Testers cannot see or affect each other's copy | `test_sandboxes.py`: access code, throttling, forged tokens, data, clock and sign-in isolation, cleanup | Met |
-| Wearable | Reproducible simulator test; untested hardware assumptions documented | `apps/web/src/wearables/WearableAdapter.test.ts` covers routing and fallback for the browser stand-in only | **Not met.** No MockDeviceKit run exists |
-| Accessibility | Large text, simple controls, voice alternatives evaluated with consenting users | Hyperlegible typeface, 48 px targets, typed and tapped alternatives, quiet mode, reduced-motion support are built | **Not met.** No user evaluation; no WCAG audit |
+| Wearable | Reproducible simulator test; untested hardware assumptions documented | Only the `WearableAdapter` interface and a phone adapter exist; nothing simulates the glasses | **Not met.** No MockDeviceKit run exists |
+| Accessibility | Large text, simple controls, voice alternatives evaluated with consenting users | Hyperlegible typeface, 48 px targets, typed and tapped alternatives, reduced-motion support are built | **Not met.** No user evaluation; no WCAG audit |
 
 ## Not measured
 

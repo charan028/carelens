@@ -84,12 +84,31 @@ class RuleBasedIntentModel:
         return Intent("unknown", _slots(cleaned))
 
 
-class ConstrainedLLMIntentModel:
-    """Adapter seam for a tool-calling LLM. Not wired to a provider in the MVP.
+PERIODS = ("morning", "midday", "evening", "night")
 
-    `complete` must return one intent name. Anything outside `INTENTS` is
+
+def _llm_slots(data: dict) -> dict:
+    """Keep only well-formed details from the model; everything else is dropped."""
+    slots: dict = {}
+    if data.get("period") in PERIODS:
+        slots["period"] = data["period"]
+    lead = data.get("lead_days")
+    if isinstance(lead, int) and not isinstance(lead, bool) and 0 <= lead <= 30:
+        slots["lead_days"] = lead
+    medicine = data.get("medicine")
+    if isinstance(medicine, str) and 0 < len(medicine.strip()) <= 80:
+        slots["medicine"] = medicine.strip().lower()
+    return slots
+
+
+class ConstrainedLLMIntentModel:
+    """Adapter seam for an LLM classifier (see app/ai/llm.py for the Claude one).
+
+    `complete` returns an intent name, or a dict with `intent` and optional
+    `medicine` / `period` / `lead_days`. Anything outside `INTENTS` is
     discarded and the rule-based model is used instead, so a model failure or
-    a prompt injection can at worst pick the wrong allowed intent.
+    a prompt injection can at worst pick the wrong allowed intent. Details are
+    validated here, never trusted as-is.
     """
 
     def __init__(self, complete, fallback: IntentModel | None = None):
@@ -98,9 +117,13 @@ class ConstrainedLLMIntentModel:
 
     def classify(self, text: str) -> Intent:
         try:
-            name = str(self._complete(text, INTENTS)).strip()
+            result = self._complete(text, INTENTS)
         except Exception:
             return self._fallback.classify(text)
+        if isinstance(result, dict):
+            name, details = str(result.get("intent", "")).strip(), result
+        else:
+            name, details = str(result).strip(), {}
         if name not in INTENTS:
             return self._fallback.classify(text)
-        return Intent(name, _slots(text))
+        return Intent(name, {**_slots(text), **_llm_slots(details)})

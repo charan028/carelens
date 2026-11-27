@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, type SeniorView } from "../api/client";
 import { clockTime, doseTone, StatusChip } from "../components/parts";
 
-const ALL_SCOPES: Record<string, string> = { medications: "medicines", bills: "bills", appointments: "appointments" };
+const ALL_SCOPES: Record<string, string> = { medications: "medicines", bills: "bills" };
 
 // --- caregiver dashboard -----------------------------------------------------
 
@@ -121,19 +121,6 @@ export function CaregiverDashboard({ token, refreshKey }: { token: string; refre
               </>
             )}
 
-            {view.appointments && (
-              <>
-                <h3>Appointments</h3>
-                {view.appointments.length === 0 && <p className="empty">None in the next week.</p>}
-                <ul className="plain">
-                  {view.appointments.map((appointment) => (
-                    <li key={appointment.id}>
-                      {appointment.date_label} at {appointment.local_time}: {appointment.title.replace(" (synthetic)", "")}
-                    </li>
-                  ))}
-                </ul>
-              </>
-            )}
           </section>
         );
       })}

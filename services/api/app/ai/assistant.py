@@ -75,14 +75,18 @@ def _greeting(user: User) -> str:
     return f"Good {part}, {user.display_name.split()[0]}."
 
 
-def _mentioned(text: str, doses: list[dict]) -> list[dict]:
+def _mentioned(text: str, doses: list[dict], hint: str = "") -> list[dict]:
+    """Doses named in the text, or matching the classifier's corrected medicine name."""
     lowered = text.lower()
-    return [dose for dose in doses if dose["name"].lower() in lowered]
+    return [
+        dose for dose in doses
+        if dose["name"].lower() in lowered or (hint and (hint in dose["name"].lower() or dose["name"].lower() in hint))
+    ]
 
 
 def _focus(text: str, context: dict, doses: list[dict]) -> tuple[list[dict], bool]:
     """Which dose is the person talking about? Returns (doses, was_ambiguous)."""
-    named = _mentioned(text, doses)
+    named = _mentioned(text, doses, context.get("medicine_hint", ""))
     awaiting = [dose for dose in doses if dose["status"] in DoseStatus.AWAITING]
     if named:
         pending = [dose for dose in named if dose["status"] in DoseStatus.AWAITING]
@@ -191,9 +195,15 @@ def _education(db: Session, user: User, intent: Intent, text: str, context: dict
     mine = tools.call("get_verified_medications", db, user)
     calls = ["get_today_tasks", "get_verified_medications"]
     lowered = text.lower()
+    hint = context.get("medicine_hint", "")
     rxcui, focus = None, None
 
-    named = [m for m in mine if m["name"].lower() in lowered or any(b.lower() in lowered for b in m["brand_names"])]
+    named = [
+        m for m in mine
+        if m["name"].lower() in lowered
+        or any(b.lower() in lowered for b in m["brand_names"])
+        or (hint and (hint in m["name"].lower() or any(hint == b.lower() for b in m["brand_names"])))
+    ]
     if named:
         rxcui = named[0]["rxcui"]
         focus = next((d for d in data["medications"] if d["rxcui"] == rxcui), None)
@@ -210,7 +220,7 @@ def _education(db: Session, user: User, intent: Intent, text: str, context: dict
         elif len(mine) == 1:
             rxcui = mine[0]["rxcui"]
     if rxcui is None:
-        query = _typed_name(lowered)
+        query = _typed_name(lowered) or hint
         if not query:
             return Reply(UNKNOWN_MEDICINE, intent.name, tool_calls=calls)
         found = education.search_drugs(db, query)
@@ -469,6 +479,9 @@ def handle(db: Session, user: User, text: str, context: dict | None = None) -> d
         )
     else:
         intent = _intent_model.classify(text)
+        if intent.slots.get("medicine"):
+            # A corrected drug name from the classifier; handlers match it like a typed name.
+            context = {**context, "medicine_hint": intent.slots["medicine"]}
         if intent.name == "repeat" and context.get("last_reply"):
             reply = Reply(str(context["last_reply"])[:1200], "repeat")
         else:

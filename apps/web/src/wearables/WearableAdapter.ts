@@ -1,14 +1,9 @@
 // One seam for every output/input device (blueprint section 4, "Meta-specific
-// plan"). The app talks to `OutputRouter`; adapters hide the device.
-//
-//   PhoneAdapter            real: this browser's speech synthesis/recognition
-//   SimulatedGlassesAdapter stand-in: models connect/disconnect, a one-line
-//                           display and an audio route, in the browser
-//
-// IMPORTANT: SimulatedGlassesAdapter is NOT Meta's MockDeviceKit and proves
-// nothing about real glasses. A Kotlin `MetaMockAdapter` backed by the Meta
-// Wearables Device Access Toolkit implements this same contract in the
-// Android app (see apps/android/README.md); that work is not done yet.
+// plan"). The app talks to a `WearableAdapter`; today the only one is the
+// phone, backed by this browser's speech synthesis and recognition. A Kotlin
+// `MetaMockAdapter` backed by the Meta Wearables Device Access Toolkit will
+// implement this same contract in the Android app (see apps/android/README.md);
+// that work is not done yet.
 
 export interface AssistantOutput {
   /** What to say aloud. */
@@ -17,42 +12,13 @@ export interface AssistantOutput {
   display: string;
 }
 
-export type WearableEventType =
-  | "device.connected"
-  | "device.disconnected"
-  | "input.voice"
-  | "display.show"
-  | "audio.speak"
-  | "fallback.phone";
-
-export interface WearableEvent {
-  at: number;
-  adapter: string;
-  type: WearableEventType;
-  detail: string;
-}
-
 export interface WearableAdapter {
-  readonly id: "phone" | "glasses-sim";
+  readonly id: "phone";
   readonly label: string;
   isConnected(): boolean;
   present(output: AssistantOutput): void;
   /** Resolve with what the person said. Reject if input is unavailable. */
-  listen(): Promise<string>;
-}
-
-type Listener = (event: WearableEvent) => void;
-
-export class EventLog {
-  private listeners = new Set<Listener>();
-  emit(adapter: string, type: WearableEventType, detail: string): void {
-    const event = { at: Date.now(), adapter, type, detail };
-    this.listeners.forEach((listener) => listener(event));
-  }
-  subscribe(listener: Listener): () => void {
-    this.listeners.add(listener);
-    return () => void this.listeners.delete(listener);
-  }
+  listen(onInterim?: (text: string) => void): Promise<string>;
 }
 
 // --- browser speech ----------------------------------------------------------
@@ -83,15 +49,18 @@ export function stopSpeaking(): void {
   if ("speechSynthesis" in window) window.speechSynthesis.cancel();
 }
 
-type RecognitionCtor = new () => {
+type Recognition = {
   lang: string;
+  continuous: boolean;
   interimResults: boolean;
   maxAlternatives: number;
-  onresult: ((event: { results: { 0: { 0: { transcript: string } } } }) => void) | null;
+  onresult: ((event: { results: ArrayLike<{ isFinal: boolean; 0: { transcript: string } }> }) => void) | null;
   onerror: ((event: { error: string }) => void) | null;
   onend: (() => void) | null;
   start(): void;
+  stop(): void;
 };
+type RecognitionCtor = new () => Recognition;
 
 function recognitionCtor(): RecognitionCtor | null {
   const scope = window as unknown as Record<string, RecognitionCtor | undefined>;
@@ -116,7 +85,19 @@ const VOICE_PROBLEMS: Record<string, string> = {
   aborted: "Listening was interrupted. Tap the microphone to try again.",
 };
 
-function listenOnce(): Promise<string> {
+// Older adults pause mid-sentence; the browser's default stops at the first pause.
+// ponytail: fixed pauses; make them settings if real users need longer.
+const PAUSE_MS = 2000; // silence after the last words before we stop
+const MAX_LISTEN_MS = 15000; // hard cap, so a noisy room can't keep the mic open
+
+let active: Recognition | null = null;
+
+/** Ends the current listen early (the mic button while listening). */
+export function stopListening(): void {
+  active?.stop();
+}
+
+function listenOnce(onInterim?: (text: string) => void): Promise<string> {
   return new Promise((resolve, reject) => {
     const Ctor = recognitionCtor();
     if (!Ctor) {
@@ -124,27 +105,47 @@ function listenOnce(): Promise<string> {
       return;
     }
     stopSpeaking();
+    active?.stop();
     const recognition = new Ctor();
+    active = recognition;
     recognition.lang = "en-US";
-    recognition.interimResults = false;
+    recognition.continuous = true;
+    recognition.interimResults = true;
     recognition.maxAlternatives = 1;
+
     let heard = "";
+    let failure: Error | null = null;
+    let quiet = 0;
+    const finish = () => recognition.stop();
+    const cap = window.setTimeout(finish, MAX_LISTEN_MS);
+
     recognition.onresult = (event) => {
-      heard = event.results[0][0].transcript;
+      heard = Array.from(event.results, (result) => result[0].transcript).join(" ").replace(/\s+/g, " ").trim();
+      onInterim?.(heard);
+      window.clearTimeout(quiet);
+      quiet = window.setTimeout(finish, PAUSE_MS);
     };
-    recognition.onerror = (event) =>
-      reject(new Error(VOICE_PROBLEMS[event.error] ?? `Voice input failed (${event.error}). Type instead.`));
-    recognition.onend = () => (heard ? resolve(heard) : reject(new Error("I didn't hear anything.")));
+    recognition.onerror = (event) => {
+      if (event.error === "no-speech" && heard) return; // a long pause after words: not an error
+      failure = new Error(VOICE_PROBLEMS[event.error] ?? `Voice input failed (${event.error}). Type instead.`);
+    };
+    recognition.onend = () => {
+      window.clearTimeout(cap);
+      window.clearTimeout(quiet);
+      if (active === recognition) active = null;
+      if (heard) resolve(heard);
+      else reject(failure ?? new Error("I didn't hear anything. Tap the microphone, then speak, or type instead."));
+    };
     recognition.start();
   });
 }
 
-// --- adapters ----------------------------------------------------------------
+// --- the phone ---------------------------------------------------------------
 
 export class PhoneAdapter implements WearableAdapter {
   readonly id = "phone" as const;
   readonly label = "Phone";
-  constructor(private log: EventLog, private speech: () => SpeechSettings) {}
+  constructor(private speech: () => SpeechSettings) {}
 
   isConnected(): boolean {
     return true; // the phone is always the baseline
@@ -152,91 +153,9 @@ export class PhoneAdapter implements WearableAdapter {
 
   present(output: AssistantOutput): void {
     speak(output.speech, this.speech());
-    this.log.emit(this.id, "audio.speak", `phone speaker: ${output.display}`);
   }
 
-  async listen(): Promise<string> {
-    const text = await listenOnce();
-    this.log.emit(this.id, "input.voice", "phone microphone");
-    return text;
-  }
-}
-
-export class SimulatedGlassesAdapter implements WearableAdapter {
-  readonly id = "glasses-sim" as const;
-  readonly label = "Glasses (browser stand-in)";
-  private connected = false;
-  private line = "";
-  private onChange: () => void = () => {};
-
-  constructor(private log: EventLog, private speech: () => SpeechSettings) {}
-
-  /** Lets the UI re-render when the simulated device changes. */
-  bind(onChange: () => void): void {
-    this.onChange = onChange;
-  }
-
-  isConnected(): boolean {
-    return this.connected;
-  }
-
-  displayLine(): string {
-    return this.connected ? this.line : "";
-  }
-
-  connect(): void {
-    this.connected = true;
-    this.line = "Connected";
-    this.log.emit(this.id, "device.connected", "simulated pairing complete");
-    this.onChange();
-  }
-
-  disconnect(): void {
-    this.connected = false;
-    this.line = "";
-    this.log.emit(this.id, "device.disconnected", "simulated power-off or out of range");
-    this.onChange();
-  }
-
-  present(output: AssistantOutput): void {
-    if (!this.connected) throw new Error("glasses are not connected");
-    this.line = output.display;
-    this.log.emit(this.id, "display.show", output.display);
-    // Audio really plays through this computer; the route is what's simulated.
-    speak(output.speech, this.speech());
-    this.log.emit(this.id, "audio.speak", "simulated glasses speaker");
-    this.onChange();
-  }
-
-  async listen(): Promise<string> {
-    if (!this.connected) throw new Error("The glasses are not connected. Use the phone.");
-    const text = await listenOnce();
-    this.log.emit(this.id, "input.voice", "simulated glasses microphone");
-    return text;
-  }
-}
-
-/**
- * Sends output to the glasses when they are connected and to the phone when
- * they are not. The phone screen always shows the full reply as well, so a
- * critical reminder never depends on the wearable.
- */
-export class OutputRouter {
-  constructor(
-    private phone: WearableAdapter,
-    private glasses: WearableAdapter,
-    private log: EventLog,
-  ) {}
-
-  present(output: AssistantOutput, preferGlasses: boolean): "phone" | "glasses-sim" {
-    if (preferGlasses) {
-      if (this.glasses.isConnected()) {
-        this.glasses.present(output);
-        return this.glasses.id;
-      }
-      this.log.emit(this.phone.id, "fallback.phone", "glasses unavailable; delivered on the phone");
-    }
-    this.phone.present(output);
-    return this.phone.id;
+  listen(onInterim?: (text: string) => void): Promise<string> {
+    return listenOnce(onInterim);
   }
 }

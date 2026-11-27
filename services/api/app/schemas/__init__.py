@@ -30,14 +30,6 @@ class BillCreate(BaseModel):
     private: bool = False
 
 
-class AppointmentCreate(BaseModel):
-    title: str = Field(min_length=1, max_length=160)
-    starts_on: date
-    local_time: str = Field(pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
-    location: str = Field(default="", max_length=160)
-    reminder_lead_minutes: int = Field(default=120, ge=0, le=60 * 24 * 7)
-
-
 class BillStatusUpdate(BaseModel):
     status: Literal[
         "self_reported_paid", "verified_paid", "cancelled", "upcoming"
@@ -70,7 +62,3 @@ class ClockChange(BaseModel):
     advance_minutes: Optional[int] = Field(default=None, ge=1, le=60 * 24 * 14)
     set_local_time: Optional[str] = Field(default=None, pattern=r"^\d{2}:\d{2}$")
     reset: bool = False
-
-
-class SandboxRequest(BaseModel):
-    access_code: str = Field(default="", max_length=200)

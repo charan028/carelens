@@ -36,7 +36,7 @@ _calls: dict[str, deque] = defaultdict(deque)
 
 def rate_limit(user: User, bucket: str = "assistant") -> None:
     """Sliding one-minute window per user. In-process; fine for one demo node."""
-    window = _calls[f"{bucket}:{clock.sandbox()}:{user.id}"]
+    window = _calls[f"{bucket}:{user.id}"]
     now = time.monotonic()
     while window and now - window[0] > 60:
         window.popleft()

@@ -5,14 +5,16 @@ Run from services/api:  uvicorn app.main:app --port 8000
 from __future__ import annotations
 
 import asyncio
+import base64
+import hmac
 import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from . import clock, sandbox, seed
+from . import seed
 from . import db as database
 from .api.v1 import senior, shared
 from .config import settings
@@ -23,67 +25,37 @@ log = logging.getLogger("carelens")
 
 
 def run_engine_once() -> None:
-    """One reminder pass over every world this process is responsible for."""
-    if not sandbox.enabled():
-        with SessionLocal() as session:
-            engine.tick(session)
-        return
-    sandbox.flush_last_seen()
-    for sandbox_id in sandbox.active_ids():
-        try:
-            with clock.scope(sandbox_id), sandbox.session_factory(sandbox_id)() as session:
-                engine.tick(session)
-        except Exception:  # one broken sandbox must not stop the others
-            log.exception("reminder engine pass failed for one sandbox")
+    with SessionLocal() as session:
+        engine.tick(session)
 
 
 async def _engine_loop() -> None:
-    passes = 0
     while True:
         try:
             await asyncio.to_thread(run_engine_once)
-            passes += 1
-            if sandbox.enabled() and passes % 240 == 0:
-                await asyncio.to_thread(sandbox.purge_expired)
         except Exception:  # keep reminding even if one pass fails
             # Type only: exception text could carry record contents.
             log.exception("reminder engine pass failed")
         await asyncio.sleep(settings.engine_interval_s)
 
 
-def _report_startup() -> None:
-    """Say plainly which database and mode this process is using, then test it.
-
-    Printed once at startup so a wrong or missing connection string is obvious.
-    The password is never printed.
-    """
+def _configure_intent_model() -> None:
     out = logging.getLogger("uvicorn.error")
-    info = database.describe_database()
-    mode = "hosted (access code, private copy per tester)" if sandbox.enabled() else "local (one shared copy, no access code)"
-    out.info("CareLens mode: %s", mode)
-    out.info("CareLens database: %s at %s", info["kind"], info["location"])
-    if "url" in info:
-        out.info("CareLens database user: %s", info["user"])
-        out.info("CareLens connection string (password hidden): %s", info["url"])
-    for hint in info["hints"]:
-        out.warning("CareLens database note: %s", hint)
-    problem = database.check_connection()
-    if problem:
-        out.error("CareLens database connection FAILED: %s", problem)
-        raise RuntimeError("Cannot reach the database. See the lines above for where it points and why it failed.")
-    out.info("CareLens database connection: OK")
+    if not settings.intent_llm:
+        out.info("CareLens intent model: rules only (set ANTHROPIC_API_KEY to use Claude)")
+        return
+    from .ai import assistant, llm
+    from .ai.intent import ConstrainedLLMIntentModel
+
+    assistant.set_intent_model(ConstrainedLLMIntentModel(llm.make_completer(settings.intent_model)))
+    out.info("CareLens intent model: %s, rules as fallback", settings.intent_model)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    problems = settings.hosted_problems()
-    if problems:
-        raise RuntimeError("Refusing to start a hosted demo: " + "; ".join(problems))
-    _report_startup()
     task = None
-    if sandbox.enabled():
-        sandbox.init()
-    elif settings.is_demo:
+    _configure_intent_model()
+    if settings.is_demo:
         # Demo convenience. Real deployments run `alembic upgrade head`.
         Base.metadata.create_all(database.engine)
         with SessionLocal() as session:
@@ -104,6 +76,29 @@ app = FastAPI(
 )
 app.include_router(senior.router)
 app.include_router(shared.router)
+
+
+def _password_ok(header: str) -> bool:
+    if not header.lower().startswith("basic "):
+        return False
+    try:
+        given = base64.b64decode(header[6:]).decode().partition(":")[2]
+    except Exception:
+        return False
+    return hmac.compare_digest(given, settings.demo_password)
+
+
+@app.middleware("http")
+async def demo_password(request: Request, call_next):
+    """A public demo link shares one copy; a single password keeps strangers out."""
+    if settings.demo_password and request.url.path != "/health":
+        if not _password_ok(request.headers.get("authorization", "")):
+            return Response(
+                "This CareLens demo needs a password. Any name, then the password you were given.",
+                status_code=401,
+                headers={"WWW-Authenticate": 'Basic realm="CareLens demo"'},
+            )
+    return await call_next(request)
 
 
 @app.middleware("http")

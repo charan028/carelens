@@ -11,8 +11,7 @@ and caregiver flows could be built and tested first.
 
 - The HTTP API (`/v1/...`), including `Idempotency-Key` on mutations.
 - The device seam in `apps/web/src/wearables/WearableAdapter.ts`:
-  `present(speech, display)`, `listen()`, `isConnected()`, and an output router
-  that falls back to the phone and logs it.
+  `present(speech, display)`, `listen()`, `isConnected()`.
 - The offline rules in `apps/web/src/api/offline.ts`: cache the day plan,
   remind locally, queue taps with idempotency keys, do not process voice
   offline.

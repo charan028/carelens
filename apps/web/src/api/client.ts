@@ -24,36 +24,6 @@ export function isOffline(): boolean {
   return simulatedOffline || !navigator.onLine;
 }
 
-// --- hosted demo: each tester's private sandbox --------------------------------
-
-const SANDBOX_KEY = "carelens.sandbox";
-let sandboxToken: string | null = null;
-try {
-  sandboxToken = window.localStorage.getItem(SANDBOX_KEY);
-} catch {
-  /* storage unavailable: the tester re-enters the code after a reload */
-}
-let sandboxLost: () => void = () => {};
-
-export function hasSandbox(): boolean {
-  return sandboxToken !== null;
-}
-
-export function setSandboxToken(token: string | null): void {
-  sandboxToken = token;
-  try {
-    if (token) window.localStorage.setItem(SANDBOX_KEY, token);
-    else window.localStorage.removeItem(SANDBOX_KEY);
-  } catch {
-    /* see above */
-  }
-}
-
-/** Called when the server says the sandbox is gone (expired or unknown). */
-export function onSandboxLost(handler: () => void): void {
-  sandboxLost = handler;
-}
-
 let signInLost: () => void = () => {};
 
 /** Called when the server rejects a sign-in token (for example after a restart). */
@@ -76,7 +46,6 @@ export async function api<T>(path: string, options: Options = {}): Promise<T> {
   if (options.body !== undefined) headers["Content-Type"] = "application/json";
   if (options.token) headers["Authorization"] = `Bearer ${options.token}`;
   if (options.idempotencyKey) headers["Idempotency-Key"] = options.idempotencyKey;
-  if (sandboxToken) headers["X-Sandbox"] = sandboxToken;
   let response: Response;
   try {
     response = await fetch(path, {
@@ -87,10 +56,7 @@ export async function api<T>(path: string, options: Options = {}): Promise<T> {
   } catch {
     throw new OfflineError();
   }
-  if (response.status === 401 && response.headers.get("X-CareLens-Sandbox") === "required") {
-    setSandboxToken(null);
-    sandboxLost();
-  } else if (response.status === 401 && options.token) {
+  if (response.status === 401 && options.token) {
     signInLost(); // sign in again instead of failing on every poll
   }
   if (!response.ok) {
@@ -142,14 +108,6 @@ export interface Bill {
   private: boolean;
 }
 
-export interface Appointment {
-  id: string;
-  title: string;
-  location: string;
-  date_label: string;
-  local_time: string;
-}
-
 export interface Today {
   synthetic_notice: string | null;
   user: { id: string; display_name: string; timezone: string };
@@ -159,7 +117,6 @@ export interface Today {
   clock_simulated: boolean;
   medications: Dose[];
   bills: Bill[];
-  appointments: Appointment[];
   awaiting_verification: { prescription_id: string; name: string; strength: string; note: string }[];
 }
 
@@ -205,8 +162,6 @@ export interface CaregiverConsent {
 
 export interface Consents {
   caregivers: CaregiverConsent[];
-  escalation_enabled: boolean;
-  escalation_after_reminders: number;
 }
 
 export interface SeniorView {
@@ -217,7 +172,6 @@ export interface SeniorView {
   local_now: string;
   medications?: Dose[];
   bills?: Bill[];
-  appointments?: Appointment[];
   alerts: Notice[];
 }
 

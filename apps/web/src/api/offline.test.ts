@@ -23,7 +23,7 @@ function today(doses: Dose[]): Today {
   return {
     synthetic_notice: "Synthetic demo data.", user: { id: "u", display_name: "Rosa", timezone: "America/Chicago" },
     now: "2026-11-23T13:55:00+00:00", local_now: "7:55 AM", date_label: "Monday, November 23",
-    clock_simulated: true, medications: doses, bills: [], appointments: [], awaiting_verification: [],
+    clock_simulated: true, medications: doses, bills: [], awaiting_verification: [],
   };
 }
 

@@ -99,7 +99,7 @@ def seed_if_empty(db: Session) -> bool:
 def reset_and_seed(db: Session) -> None:
     db.rollback()
     db.close()
-    engine = db.get_bind()  # the caller's own sandbox, never anyone else's
+    engine = db.get_bind()
     Base.metadata.drop_all(engine)
     Base.metadata.create_all(engine)
     seed(db)

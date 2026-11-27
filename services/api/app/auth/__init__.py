@@ -13,16 +13,13 @@ from typing import Callable
 from fastapi import Depends, Header, HTTPException
 from sqlalchemy.orm import Session
 
-from .. import clock
 from ..config import settings
 from ..db import get_db
 from ..models import User
 
 
 def _sign(user_id: str) -> str:
-    # Bound to the sandbox, so a token from one tester's copy is worthless in another's.
-    message = f"{clock.sandbox()}|{user_id}".encode()
-    return hmac.new(settings.secret_key.encode(), message, hashlib.sha256).hexdigest()[:40]
+    return hmac.new(settings.secret_key.encode(), user_id.encode(), hashlib.sha256).hexdigest()[:40]
 
 
 def issue_token(user_id: str) -> str:

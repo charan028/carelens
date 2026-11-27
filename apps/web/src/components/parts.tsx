@@ -1,7 +1,5 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState } from "react";
 import { api, type Dose, type Source } from "../api/client";
-import type { SimulatedGlassesAdapter, WearableEvent } from "../wearables/WearableAdapter";
-import { voiceInputAvailable } from "../wearables/WearableAdapter";
 
 export const AWAITING = ["scheduled", "reminded", "overdue"];
 
@@ -38,32 +36,67 @@ export function periodOfHour(hour: number): Dose["period"] {
   return "night";
 }
 
-export function DayStrip({ doses, current }: { doses: Dose[]; current: Dose["period"] }) {
+export function DayStrip({ doses, current, onJump }: { doses: Dose[]; current: Dose["period"]; onJump: (period: Dose["period"]) => void }) {
   return (
     <ol className="daystrip" aria-label="Today's medicines by time of day">
       {PERIODS.map((period) => {
         const mine = doses.filter((dose) => dose.period === period.id);
+        const summary = mine.length
+          ? mine.map((dose) => `${dose.name}, ${dose.local_time}: ${dose.status_label}`).join("; ")
+          : "nothing scheduled";
         return (
-          <li key={period.id} className={`compartment ${period.id === current ? "is-now" : ""}`}>
-            <span className="compartment-label">{period.label}</span>
-            <span className="compartment-pills">
-              {mine.length === 0 && <span className="pill pill-none" aria-label="Nothing scheduled" />}
-              {mine.map((dose) => (
-                <span
-                  key={dose.dose_event_id}
-                  className={`pill pill-${doseTone(dose)}`}
-                  title={`${dose.name}, ${dose.local_time}: ${dose.status_label}`}
-                >
-                  <span className="visually-hidden">
-                    {dose.name}, {dose.local_time}: {dose.status_label}
-                  </span>
-                </span>
-              ))}
-            </span>
+          <li key={period.id}>
+            <button
+              type="button"
+              className={`compartment ${period.id === current ? "is-now" : ""}`}
+              disabled={mine.length === 0}
+              onClick={() => onJump(period.id)}
+              aria-label={`${period.label}: ${summary}${mine.length ? ". Show these medicines" : ""}`}
+            >
+              <span className="compartment-label">{period.label}</span>
+              <span className="compartment-pills" aria-hidden="true">
+                {mine.length === 0 && <span className="pill pill-none" />}
+                {mine.map((dose) => (
+                  <span key={dose.dose_event_id} className={`pill pill-${doseTone(dose)}`} />
+                ))}
+              </span>
+            </button>
           </li>
         );
       })}
     </ol>
+  );
+}
+
+// --- demo drawer -------------------------------------------------------------
+
+/** Who you are viewing as, and the demo clock. Closed by default. */
+const DRAWER_KEY = "carelens.demobar";
+
+export function DemoBar({ summary, children }: { summary: React.ReactNode; children: React.ReactNode }) {
+  // Stays open across "Restart the day", which reloads the page.
+  const [open, setOpen] = useState(() => {
+    try {
+      return window.sessionStorage.getItem(DRAWER_KEY) === "open";
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try {
+      window.sessionStorage.setItem(DRAWER_KEY, open ? "open" : "closed");
+    } catch {
+      /* private mode: the drawer just starts closed after a reload */
+    }
+  }, [open]);
+  return (
+    <section className="demobar" aria-label="Demo: viewer and clock">
+      <button className="demobar-summary" onClick={() => setOpen((value) => !value)} aria-expanded={open}>
+        <span>{summary}</span>
+        <span className="hint">{open ? "Hide ▴" : "Switch person or move the clock ▾"}</span>
+      </button>
+      {open && <div className="demobar-body">{children}</div>}
+    </section>
   );
 }
 
@@ -88,79 +121,6 @@ export function SourceList({ sources, timeZone }: { sources: Source[]; timeZone:
         </li>
       ))}
     </ul>
-  );
-}
-
-// --- glasses stand-in ------------------------------------------------------------
-
-interface GlassesProps {
-  glasses: SimulatedGlassesAdapter;
-  events: WearableEvent[];
-  onSay: (text: string) => void;
-  onListen: () => void;
-  listening: boolean;
-}
-
-export function GlassesPanel({ glasses, events, onSay, onListen, listening }: GlassesProps) {
-  const [typed, setTyped] = useState("");
-  const connected = glasses.isConnected();
-  const submit = (event: FormEvent) => {
-    event.preventDefault();
-    if (typed.trim()) onSay(typed.trim());
-    setTyped("");
-  };
-  return (
-    <section className="panel" aria-labelledby="glasses-title">
-      <h2 id="glasses-title">Glasses stand-in</h2>
-      <p className="panel-note">
-        A browser model of a wearable, so the phone fallback can be shown. It is not Meta&rsquo;s
-        MockDeviceKit and says nothing about real glasses.
-      </p>
-      <div className={`lens ${connected ? "is-on" : ""}`} aria-live="polite">
-        {connected ? glasses.displayLine() || "Ready" : "Not connected"}
-      </div>
-      <div className="row">
-        <button className="button" onClick={() => (connected ? glasses.disconnect() : glasses.connect())}>
-          {connected ? "Disconnect glasses" : "Connect glasses"}
-        </button>
-        <button
-          className="button"
-          onClick={onListen}
-          disabled={!connected || listening || !voiceInputAvailable()}
-          title={voiceInputAvailable() ? "" : "Voice input isn't available in this browser"}
-        >
-          {listening ? "Listening…" : "Talk through glasses"}
-        </button>
-      </div>
-      <form className="row" onSubmit={submit}>
-        <label className="visually-hidden" htmlFor="glasses-say">
-          Type what the wearer says
-        </label>
-        <input
-          id="glasses-say"
-          value={typed}
-          onChange={(event) => setTyped(event.target.value)}
-          placeholder="Or type what the wearer says"
-          disabled={!connected}
-          maxLength={400}
-        />
-        <button className="button" disabled={!connected || !typed.trim()}>
-          Say it
-        </button>
-      </form>
-      <h3>Device events</h3>
-      {events.length === 0 ? (
-        <p className="panel-note">Nothing yet. Connect the glasses, then ask something.</p>
-      ) : (
-        <ol className="eventlog">
-          {events.map((event, index) => (
-            <li key={`${event.at}-${index}`}>
-              <code>{event.type}</code> {event.detail}
-            </li>
-          ))}
-        </ol>
-      )}
-    </section>
   );
 }
 
@@ -194,8 +154,8 @@ export function DemoControls({ clockLabel, simulated, offline, onOffline, onCloc
   };
 
   return (
-    <section className="panel" aria-labelledby="demo-title">
-      <h2 id="demo-title">Demo controls</h2>
+    <div className="demo-controls">
+      <h3>Clock</h3>
       <p className="clock">
         {clockLabel || "…"} <span className="panel-note">{simulated ? "simulated clock" : "real time"}</span>
       </p>
@@ -220,6 +180,6 @@ export function DemoControls({ clockLabel, simulated, offline, onOffline, onCloc
         Restarting wipes the database and reloads the synthetic records. Moving the clock runs the
         reminder engine for every step, as it would run live.
       </p>
-    </section>
+    </div>
   );
 }

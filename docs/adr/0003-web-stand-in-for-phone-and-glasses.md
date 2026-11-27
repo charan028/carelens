@@ -15,11 +15,10 @@ caregiver flows could be proven without it.
 - Build the senior experience as a phone-shaped React page served by the API.
   It uses the browser's speech recognition and synthesis, caches the day plan,
   runs local reminders offline, and queues self-reports.
-- Define the device seam now: `WearableAdapter` with `PhoneAdapter` and a
-  browser `SimulatedGlassesAdapter`, behind an `OutputRouter` that falls back
-  to the phone.
-- Label the simulated glasses everywhere as a stand-in. Make no claim about
-  MockDeviceKit or hardware.
+- Define the device seam now: `WearableAdapter` with `PhoneAdapter` only.
+  (A browser imitation of the glasses existed until 2026-11-27 and was removed
+  to keep the prototype small; it proved nothing about MockDeviceKit or
+  hardware, and the real adapter will be written against the same interface.)
 
 ## Consequences
 

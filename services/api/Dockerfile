@@ -19,6 +19,6 @@ RUN useradd --system --home /srv/carelens carelens && chown -R carelens /srv/car
 USER carelens
 WORKDIR /srv/carelens/services/api
 EXPOSE 8000
-# Hosts such as Render pass the port in $PORT. One worker: sandboxes and the
-# reminder loop keep their indexes in this process (see app/sandbox.py).
+# Hosts pass the port in $PORT. One worker: the reminder loop and rate limits
+# keep their state in this process.
 CMD ["sh", "-c", "exec python -m uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1 --proxy-headers --forwarded-allow-ips='*'"]

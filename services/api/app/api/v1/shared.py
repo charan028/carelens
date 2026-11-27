@@ -3,69 +3,22 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-import time
-from collections import deque
-
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ... import clock, sandbox, seed
+from ... import clock, seed
 from ...auth import current_user, issue_token, require_role
 from ...config import settings
 from ...db import get_db
 from ...models import Prescription, PrescriptionStatus, Role, User
-from ...schemas import ClockChange, DemoLogin, SandboxRequest, VerifyPrescription
+from ...schemas import ClockChange, DemoLogin, VerifyPrescription
 from ...services import audit, caregiver, today
 from ...services.medication import education, scheduler
 from ...services.notifications import engine
 from ..deps import rate_limit
 
 router = APIRouter(prefix="/v1")
-
-
-# --- hosted demo: access code and private sandbox ----------------------------
-
-_attempts: dict[str, deque] = {}
-ATTEMPTS_PER_MINUTE = 8
-
-
-def _throttle(request: Request) -> None:
-    """Slow down access-code guessing. Per caller address, one-minute window."""
-    forwarded = request.headers.get("x-forwarded-for", "")
-    caller = forwarded.split(",")[0].strip() or (request.client.host if request.client else "?")
-    window = _attempts.setdefault(caller, deque())
-    now = time.monotonic()
-    while window and now - window[0] > 60:
-        window.popleft()
-    if len(window) >= ATTEMPTS_PER_MINUTE:
-        raise HTTPException(status_code=429, detail="Too many tries. Wait a minute and try again.")
-    window.append(now)
-    if len(_attempts) > 5000:  # keep memory bounded
-        _attempts.clear()
-
-
-@router.get("/auth/config", tags=["auth"])
-def auth_config():
-    """What the web app needs to know before it can show anything."""
-    return {"sandboxes": sandbox.enabled(), "access_code_required": sandbox.enabled()}
-
-
-@router.post("/sandbox", tags=["auth"], status_code=201)
-def create_sandbox(body: SandboxRequest, request: Request):
-    """Trade the access code for a private copy of the synthetic demo."""
-    if not sandbox.enabled():
-        raise HTTPException(status_code=404, detail="Not available.")
-    _throttle(request)
-    if not sandbox.access_code_ok(body.access_code):
-        raise HTTPException(status_code=403, detail="That access code isn't right.")
-    try:
-        sandbox_id = sandbox.create()
-    except sandbox.SandboxLimitReached:
-        raise HTTPException(
-            status_code=503, detail="The demo is full right now. Try again later."
-        )
-    return {"sandbox_token": sandbox.token_for(sandbox_id), "notice": today.SYNTHETIC_NOTICE}
 
 
 # --- sign-in (demo personas only) -------------------------------------------

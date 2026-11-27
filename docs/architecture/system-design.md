@@ -17,9 +17,9 @@ facts except through a small set of reviewed functions.
 │  voice in/out, taps        │◀──────────▶│      │                               │
 │  OfflineStore + queue      │            │      ▼                               │
 │  phone-local reminders     │            │ ai/assistant                         │
-│ OutputRouter               │            │   1. safety_policy.evaluate  (rules) │
-│  ├ PhoneAdapter            │            │   2. intent model     (closed list)  │
-│  └ SimulatedGlassesAdapter │            │   3. tools.call       (allow-list)   │
+│ WearableAdapter            │            │   1. safety_policy.evaluate  (rules) │
+│  └ PhoneAdapter            │            │   2. intent model     (closed list)  │
+│                            │            │   3. tools.call       (allow-list)   │
 │ Caregiver dashboard        │            │   4. fixed reply template            │
 │ Pharmacist queue           │            │      │                               │
 └────────────────────────────┘            │      ▼                               │
@@ -107,8 +107,8 @@ bill:  upcoming ─▶ due ─▶ overdue                           (system, by 
   reconnect; the server applies each once.
 - Voice requests are not processed offline, because the safety gate lives on
   the server. The phone says so.
-- `OutputRouter` sends output to the glasses when connected, otherwise to the
-  phone, and logs the fallback. The phone screen always shows the full reply.
+- All output goes through the `WearableAdapter` seam; today the only adapter is
+  the phone. The phone screen always shows the full reply.
 
 ## Choices worth knowing
 

@@ -112,7 +112,9 @@ def _has_demo_cookie(request: Request) -> bool:
 async def demo_password(request: Request, call_next):
     """A public demo link shares one copy; one password (as a cookie) keeps strangers out."""
     path = request.url.path
-    if not settings.demo_password or path == "/health" or path == "/demo-password" or _has_demo_cookie(request):
+    # Icons and the manifest are fetched by the browser without cookies; nothing private in them.
+    public = path in ("/health", "/demo-password", "/manifest.json") or path.endswith(".png")
+    if not settings.demo_password or public or _has_demo_cookie(request):
         return await call_next(request)
     if path.startswith("/v1/"):
         return JSONResponse({"detail": "This demo needs its password. Reload the page."}, status_code=401)

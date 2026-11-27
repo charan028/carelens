@@ -47,7 +47,8 @@ class Settings:
     intent_llm: bool = _flag("CARELENS_INTENT_LLM", bool(os.environ.get("ANTHROPIC_API_KEY")))
     intent_model: str = os.environ.get("CARELENS_INTENT_MODEL", "claude-opus-5-5")
     # One shared password in front of a public demo link (HTTP Basic). Empty = open.
-    demo_password: str = os.environ.get("CARELENS_DEMO_PASSWORD", "")
+    # Stripped: a dashboard form often keeps pasted quotes or a trailing space.
+    demo_password: str = os.environ.get("CARELENS_DEMO_PASSWORD", "").strip().strip("'\"")
     web_dist: Path = Path(
         os.environ.get("CARELENS_WEB_DIST", str(REPO_ROOT / "apps" / "web" / "dist"))
     )

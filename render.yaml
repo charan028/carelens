@@ -1,0 +1,26 @@
+# Render Blueprint: one web service (API + web app). The database is Supabase.
+# Deploy steps are in docs/hosting.md. Synthetic data only.
+services:
+  - type: web
+    name: carelens-demo
+    runtime: docker
+    dockerfilePath: ./services/api/Dockerfile
+    dockerContext: .
+    plan: free
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: CARELENS_ENV
+        value: demo
+      # Every tester gets a private copy behind the access code.
+      - key: CARELENS_SANDBOXES
+        value: "1"
+      # You choose this in the Render dashboard when the Blueprint is created.
+      - key: CARELENS_ACCESS_CODE
+        sync: false
+      - key: CARELENS_SECRET_KEY
+        generateValue: true
+      # Your Supabase "Session pooler" connection string (see docs/hosting.md).
+      # Entered in the Render dashboard; never commit it.
+      - key: CARELENS_DATABASE_URL
+        sync: false

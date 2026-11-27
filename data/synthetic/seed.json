@@ -1,0 +1,72 @@
+{
+  "_notice": "SYNTHETIC DEMO DATA. Every person, prescription, bill and appointment here is fictional. Drug identities (RxCUI, name, strength) are real public RxNorm reference concepts, checked against RxNav on 2026-11-23.",
+  "timezone": "America/Chicago",
+  "users": [
+    {"id": "usr_rosa", "display_name": "Rosa Alvarez (synthetic)", "role": "senior",
+     "accessibility": {"large_text": true, "speech_rate": 0.9},
+     "escalation_enabled": true, "escalation_after_reminders": 2},
+    {"id": "usr_daniel", "display_name": "Daniel Alvarez (synthetic)", "role": "caregiver"},
+    {"id": "usr_priya", "display_name": "Priya Shah (synthetic)", "role": "caregiver"},
+    {"id": "usr_sam", "display_name": "Sam Okafor, PharmD (synthetic)", "role": "verifier"}
+  ],
+  "grants": [
+    {"senior_id": "usr_rosa", "caregiver_id": "usr_daniel",
+     "scopes": ["medications", "appointments"], "alerts_enabled": true}
+  ],
+  "catalog": [
+    {"rxcui": "314076", "name": "lisinopril 10 MG Oral Tablet", "generic_name": "lisinopril",
+     "brand_names": ["Zestril", "Prinivil"], "strength": "10 mg", "dose_form": "oral tablet",
+     "provenance": "RxNorm SCD 314076 (NLM RxNav)"},
+    {"rxcui": "861007", "name": "metformin hydrochloride 500 MG Oral Tablet", "generic_name": "metformin",
+     "brand_names": ["Glucophage"], "strength": "500 mg", "dose_form": "oral tablet",
+     "provenance": "RxNorm SCD 861007 (NLM RxNav)"},
+    {"rxcui": "617310", "name": "atorvastatin 20 MG Oral Tablet", "generic_name": "atorvastatin",
+     "brand_names": ["Lipitor"], "strength": "20 mg", "dose_form": "oral tablet",
+     "provenance": "RxNorm SCD 617310 (NLM RxNav)"}
+  ],
+  "prescriptions": [
+    {"id": "rx_d1001", "user_id": "usr_rosa", "rxcui": "314076",
+     "verbatim_directions": "Take 1 tablet by mouth once daily in the morning.",
+     "source": "Synthetic demo prescription record #D-1001",
+     "record_times": ["08:00"], "verified_by": "usr_sam"},
+    {"id": "rx_d1002", "user_id": "usr_rosa", "rxcui": "861007",
+     "verbatim_directions": "Take 1 tablet by mouth once daily with the evening meal.",
+     "source": "Synthetic demo prescription record #D-1002",
+     "record_times": ["18:00"], "verified_by": "usr_sam"},
+    {"id": "rx_d1003", "user_id": "usr_rosa", "rxcui": "617310",
+     "verbatim_directions": "Take 1 tablet by mouth once daily at bedtime.",
+     "source": "Synthetic demo prescription record #D-1003",
+     "record_times": ["21:00"], "verified_by": null}
+  ],
+  "bills": [
+    {"owner_id": "usr_rosa", "payee_label": "Lakeshore Electric (synthetic)", "amount_cents": 8420,
+     "due_in_days": 5, "recurrence": "monthly", "reminder_lead_days": 2}
+  ],
+  "appointments": [
+    {"owner_id": "usr_rosa", "title": "Annual check-up with Dr. Chen (synthetic)", "kind": "doctor",
+     "location": "Maple Street Clinic (synthetic)", "in_days": 3, "local_time": "10:30",
+     "reminder_lead_minutes": 120}
+  ],
+  "reference_cards": [
+    {"rxcui": "314076", "source": "MedlinePlus", "title": "Lisinopril",
+     "url": "https://medlineplus.gov/druginfo/meds/a692051.html",
+     "summary": "Lisinopril is commonly used to treat high blood pressure. It belongs to a group of medicines called ACE inhibitors.",
+     "version": "bundled card, written 2026-11-23, not yet pharmacist-reviewed"},
+    {"rxcui": "314076", "source": "DailyMed", "title": "Lisinopril tablet labels",
+     "url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?labeltype=all&query=lisinopril+10+mg+tablet",
+     "summary": "Full FDA-submitted product labels, including warnings. Written for health professionals.",
+     "version": "bundled search link"},
+    {"rxcui": "861007", "source": "MedlinePlus", "title": "Metformin",
+     "url": "https://medlineplus.gov/druginfo/meds/a696005.html",
+     "summary": "Metformin is commonly used, along with diet and exercise, to help manage blood sugar in type 2 diabetes.",
+     "version": "bundled card, written 2026-11-23, not yet pharmacist-reviewed"},
+    {"rxcui": "861007", "source": "DailyMed", "title": "Metformin tablet labels",
+     "url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?labeltype=all&query=metformin+500+mg+tablet",
+     "summary": "Full FDA-submitted product labels, including warnings. Written for health professionals.",
+     "version": "bundled search link"},
+    {"rxcui": "617310", "source": "MedlinePlus", "title": "Atorvastatin",
+     "url": "https://medlineplus.gov/druginfo/meds/a600045.html",
+     "summary": "Atorvastatin is commonly used, along with diet, to lower cholesterol. It belongs to a group of medicines called statins.",
+     "version": "bundled card, written 2026-11-23, not yet pharmacist-reviewed"}
+  ]
+}

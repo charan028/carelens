@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+carelens.db
+node_modules/
+infra/.env
+demos/recordings/
+.sandboxes/
+carelens-latest.zip
